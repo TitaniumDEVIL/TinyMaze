@@ -2,52 +2,11 @@
 #include <vector>
 #include <cstdint>
 #include <queue>
+#include "algos.h"
 
 using namespace std;
 
-const int CELL_SIZE = 40;
-const int MAZE_WIDTH = 20;
-const int MAZE_HEIGHT = 20;
-
-const int PADDING = 40;
-
-const int SCREEN_WIDTH = PADDING * 2 + CELL_SIZE * MAZE_WIDTH;
-const int SCREEN_HEIGHT = PADDING * 2 + CELL_SIZE * MAZE_HEIGHT;
-
-constexpr uint8_t north = 1 << 0; // 1
-constexpr uint8_t east = 1 << 1;  // 2
-constexpr uint8_t south = 1 << 2; // 4
-constexpr uint8_t west = 1 << 3;  // 8
-
-const uint8_t dirs[4] = {north, east, south, west};
-const int dr[4] = {-1, 0, 1, 0};
-const int dc[4] = {0, 1, 0, -1};
-
-struct Point
-{
-    int r, c;
-};
-
-uint8_t opposite(uint8_t dir)
-{
-    switch (dir)
-    {
-    case north:
-        return south;
-    case east:
-        return west;
-    case south:
-        return north;
-    case west:
-        return east;
-    default:
-        return 0;
-    }
-}
-
-Point Generate(vector<vector<uint8_t>> &maze, vector<vector<bool>> &visited, Point seed, int &remaining);
 void Grid(const vector<vector<uint8_t>> &maze);
-void MakePath(vector<vector<uint8_t>> &maze, int row, int col, uint8_t dir);
 void DrawX(int row, int col, Color color);
 vector<vector<int>> DistMap(const vector<vector<uint8_t>> &maze, Point start, Point end);
 vector<Point> Solver(const vector<vector<uint8_t>> &maze, Point start, Point end, bool &solved);
@@ -57,7 +16,7 @@ uint8_t GetRandomDirection();
 
 int main()
 {
-    int FPS = 600;
+    int FPS = 120;
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "MAZE");
     SetTargetFPS(FPS);
 
@@ -72,7 +31,7 @@ int main()
     Point end = {0, MAZE_WIDTH - 1};
     int i = 0;
     double time = GetTime();
-    double delta = 2 * FPS/120;
+    double delta = 5;
     vector<Point> animatedPath = {};
 
     Point seed = {GetRandomValue(0, MAZE_HEIGHT - 1), GetRandomValue(0, MAZE_WIDTH - 1)};
@@ -84,42 +43,78 @@ int main()
     int remaining = MAZE_WIDTH * MAZE_HEIGHT - 1;
 
     float color;
+    int currentAlgo = 1;
 
-    while (!WindowShouldClose())
-    {
-        BeginDrawing();
+    auto Reset = [&]() {
+        completed = false;
+        solved = false;
+        maze.assign(MAZE_HEIGHT, vector<uint8_t>(MAZE_WIDTH, 0));
+        path.clear();
+        animatedPath.clear();
+        i = 0;
 
-        if(IsKeyPressed(KEY_UP)) {
-            FPS += 120;
-            delta = 2 * FPS/120;
-            SetTargetFPS(FPS);
-        }
-        if(IsKeyPressed(KEY_DOWN)) {
-            FPS -= 120;
-            FPS = max(FPS, 120);
-            delta = 2 * FPS/120;
-            SetTargetFPS(FPS);
-        }
-
-        if (IsKeyPressed(KEY_R))
+        visited.assign(MAZE_HEIGHT, vector<bool>(MAZE_WIDTH, false));
+        if (currentAlgo == 2 || currentAlgo == 6)
         {
-            completed = false;
-            solved = false;
-            maze.assign(MAZE_HEIGHT, vector<uint8_t>(MAZE_WIDTH, 0));
-            path.clear();
-            i = 0;
-
-            visited.assign(MAZE_HEIGHT, vector<bool>(MAZE_WIDTH, false));
+            seed = {0, 0};
+            remaining = MAZE_WIDTH * MAZE_HEIGHT;
+        }
+        else
+        {
             seed = {GetRandomValue(0, MAZE_HEIGHT - 1), GetRandomValue(0, MAZE_WIDTH - 1)};
             visited[seed.r][seed.c] = true;
             remaining = MAZE_WIDTH * MAZE_HEIGHT - 1;
         }
+    };
+
+    while (!WindowShouldClose())
+    {
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        if(IsKeyPressed(KEY_UP)) {
+            FPS += 30;
+            SetTargetFPS(FPS);
+        }
+        if(IsKeyPressed(KEY_DOWN)) {
+            FPS -= 30;
+            FPS = max(FPS, 30);
+            SetTargetFPS(FPS);
+        }
+
+        if (IsKeyPressed(KEY_R)) Reset();
+        if (IsKeyPressed(KEY_ONE))   { currentAlgo = 1; Reset(); }
+        if (IsKeyPressed(KEY_TWO))   { currentAlgo = 2; Reset(); }
+        if (IsKeyPressed(KEY_THREE)) { currentAlgo = 3; Reset(); }
+        if (IsKeyPressed(KEY_FOUR))  { currentAlgo = 4; Reset(); }
+        if (IsKeyPressed(KEY_FIVE))  { currentAlgo = 5; Reset(); }
+        if (IsKeyPressed(KEY_SIX))   { currentAlgo = 6; Reset(); }
 
         if (!completed)
         {
-            DrawRectangle(PADDING + CELL_SIZE*seed.c, PADDING + CELL_SIZE*seed.r, CELL_SIZE, CELL_SIZE, GREEN);
-            seed = Generate(maze, visited, seed, remaining);
-            if (remaining == 0)
+            DrawRectangle(PADDING + CELL_SIZE * seed.c, PADDING + CELL_SIZE * seed.r, CELL_SIZE, CELL_SIZE, GREEN);
+            switch (currentAlgo)
+            {
+            case 1:
+                seed = AldousBroder(maze, visited, seed, remaining);
+                break;
+            case 2:
+                seed = BinaryTree(maze, visited, seed, remaining);
+                break;
+            case 3:
+                seed = HuntAndKill(maze, visited, seed, remaining);
+                break;
+            case 4:
+                seed = RecursiveBacktracker(maze, visited, seed, remaining);
+                break;
+            case 5:
+                seed = Prims(maze, visited, seed, remaining);
+                break;
+            case 6:
+                seed = Sidewinder(maze, visited, seed, remaining);
+                break;
+            }
+            if (remaining <= 0)
                 completed = true;
         }
         else if (!solved)
@@ -127,15 +122,24 @@ int main()
             path = Solver(maze, start, end, solved);
         }
 
-        
-        ClearBackground(BLACK);
+        DrawText("ALGORITHMS :-", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING, 30, RAYWHITE);
+        DrawText("1 - AldousBroder", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 1, 20, currentAlgo == 1 ? GREEN : GRAY);
+        DrawText("2 - BinaryTree", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 2, 20, currentAlgo == 2 ? GREEN : GRAY);
+        DrawText("3 - HuntAndKill", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 3, 20, currentAlgo == 3 ? GREEN : GRAY);
+        DrawText("4 - Backtracker", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 4, 20, currentAlgo == 4 ? GREEN : GRAY);
+        DrawText("5 - Prims", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 5, 20, currentAlgo == 5 ? GREEN : GRAY);
+        DrawText("6 - Sidewinder", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 6, 20, currentAlgo == 6 ? GREEN : GRAY);
+        DrawText("1-6 - Algorithms", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 8, 20, Fade(GRAY, 0.8));
+        DrawText("H or H+C - HeatMap", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 9, 20,  Fade(GRAY, 0.8));
+        DrawText("S - Solve", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 10, 20, Fade(GRAY, 0.8));
+        DrawText("R - Reset", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 11, 20, Fade(GRAY, 0.8));
+        DrawText("UP/DOWN - Speed", PADDING + MAZE_WIDTH * CELL_SIZE + CELL_SIZE, PADDING + CELL_SIZE * 12, 20, Fade(GRAY, 0.8));
 
         if (IsKeyDown(KEY_S))
         {
             DrawPath(animatedPath);
             if (i < path.size() && (GetTime() - time) >= delta)
             {
-                //DrawRectangle(PADDING + path[i].c * CELL_SIZE, PADDING + path[i].r * CELL_SIZE, CELL_SIZE, CELL_SIZE, RED);
                 animatedPath.push_back(path[i]);
                 i++;
             }
@@ -152,6 +156,8 @@ int main()
             i = 0;
         }
         Grid(maze);
+        DrawLine(PADDING, PADDING + CELL_SIZE * MAZE_HEIGHT, PADDING, PADDING + CELL_SIZE * (MAZE_HEIGHT - 1), BLACK);
+        DrawLine(PADDING + CELL_SIZE * MAZE_WIDTH, PADDING, PADDING + CELL_SIZE * (MAZE_WIDTH - 1), PADDING, BLACK);
         EndDrawing();
     }
 
@@ -180,54 +186,6 @@ void Grid(const vector<vector<uint8_t>> &maze)
     }
 }
 
-void MakePath(vector<vector<uint8_t>> &maze, int row, int col, uint8_t dir)
-{
-    if (row == 0 && dir == north)
-        return;
-    if (col == MAZE_WIDTH - 1 && dir == east)
-        return;
-    if (row == MAZE_HEIGHT - 1 && dir == south)
-        return;
-    if (col == 0 && dir == west)
-        return;
-
-    maze[row][col] |= dir;
-    switch (dir)
-    {
-    case north:
-        maze[row - 1][col] |= opposite(dir);
-        break;
-    case east:
-        maze[row][col + 1] |= opposite(dir);
-        break;
-    case south:
-        maze[row + 1][col] |= opposite(dir);
-        break;
-    case west:
-        maze[row][col - 1] |= opposite(dir);
-        break;
-    }
-}
-
-Point Generate(vector<vector<uint8_t>> &maze, vector<vector<bool>> &visited, Point seed, int &remaining)
-{
-    int d, nr, nc;
-    do
-    {
-        d = GetRandomValue(0, 3);
-        nr = seed.r + dr[d];
-        nc = seed.c + dc[d];
-    } while (nr < 0 || nr >= MAZE_HEIGHT || nc < 0 || nc >= MAZE_WIDTH);
-
-    if (!visited[nr][nc])
-    {
-        MakePath(maze, seed.r, seed.c, dirs[d]);
-        visited[nr][nc] = true;
-        remaining--;
-    }
-    return {nr, nc};
-}
-
 uint8_t GetRandomDirection()
 {
     int val = GetRandomValue(0, 3);
@@ -239,6 +197,7 @@ uint8_t GetRandomDirection()
         return south;
     if (val == 3)
         return west;
+    return 0;
 }
 
 vector<Point> Solver(const vector<vector<uint8_t>> &maze, Point start, Point end, bool &solved)
